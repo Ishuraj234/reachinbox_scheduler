@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  FAILED
+  RESCHEDULED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  googleId  String   @unique
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  senders   Sender[]
+  batches   EmailBatch[]
+}
+
+// A "Sender" is an SMTP identity used to send mail (Ethereal account in this project).
+// Rate limiting (emails/hour) is tracked per sender.
+model Sender {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  label        String
+  smtpHost     String
+  smtpPort     Int
+  smtpUser     String
+  smtpPass     String
+  maxPerHour   Int      @default(200)
+  createdAt    DateTime @default(now())
+
+  emails       ScheduledEmail[]
+}
+
+// One "Compose" submission (subject/body/csv) creates a batch containing many ScheduledEmail rows.
+model EmailBatch {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  subject         String
+  body            String   @db.Text
+  startTime       DateTime
+  delayMs         Int
+  hourlyLimit     Int
+  totalRecipients Int
+  createdAt       DateTime @default(now())
+
+  emails          ScheduledEmail[]
+}
+
+model ScheduledEmail {
+  id            String      @id @default(uuid())
+  batchId       String
+  batch         EmailBatch  @relation(fields: [batchId], references: [id])
+  senderId      String?
+  sender        Sender?     @relation(fields: [senderId], references: [id])
+
+  recipientEmail String
+  subject        String
+  body            String     @db.Text
+
+  scheduledFor   DateTime
+  status         EmailStatus @default(SCHEDULED)
+  attempts       Int         @default(0)
+  bullJobId      String?     @unique
+  errorMessage   String?
+  sentAt         DateTime?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([status])
+  @@index([scheduledFor])
+}
